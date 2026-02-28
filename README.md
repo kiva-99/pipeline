@@ -179,4 +179,5 @@ groovy -DdryRun=true groovy-scripts/deploy-app.groovy
 Создайте тестовую ветку в Git
 Внесите изменения в Jenkinsfile
 Запустите сборку с параметром DEPLOY_ENV=dev
+<<<<<<< HEAD
 Проверьте логи и результаты в Jenkins UI
