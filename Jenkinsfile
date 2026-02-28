@@ -160,10 +160,10 @@ pipeline {
             steps {
                 echo "🚀 Деплой приложения в окружение: ${env.DEPLOY_ENV}"
                 script {
-                    // Загружаем внешний Groovy-скрипт из текущего репо (pipeline)
-                    // Он лежит рядом с Jenkinsfile
+                    // Загружаем внешний Groovy-скрипт
                     def deployScript = load 'groovy-scripts/deploy-app.groovy'
                     
+                    // ИСПРАВЛЕНИЕ: вызываем метод deploy() у загруженного объекта
                     deployScript.deploy(
                         imageName: env.DOCKER_IMAGE,
                         containerName: "${env.APP_NAME}-${env.DEPLOY_ENV}",
