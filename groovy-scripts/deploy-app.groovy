@@ -1,12 +1,10 @@
-// deploy-app.groovy
-// Скрипт деплоя Docker-контейнера
-
-def deploy(Map config) {
+// deploy-app.groovy — Groovy-скрипт для деплоя Docker-контейнера
+def call(Map config) {
     def imageName = config.imageName ?: 'app:latest'
     def containerName = config.containerName ?: 'app-container'
     def port = config.port ?: '8080'
     def environment = config.environment ?: 'staging'
-
+    
     echo "🚀 Деплой: ${imageName} → ${containerName} (порт ${port}, env: ${environment})"
 
     try {
@@ -40,6 +38,4 @@ def deploy(Map config) {
         throw e
     }
 }
-
-// Возвращаем этот объект, чтобы можно было вызвать методы
 return this
