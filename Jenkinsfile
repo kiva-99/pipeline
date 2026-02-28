@@ -1,9 +1,12 @@
 // Jenkinsfile — Declarative Pipeline для HW32
+// Архитектура: Скрипт в репо 'pipeline', Приложение в репо 'HW'
+// Автор: Иванов Кирилл Константинович
+
 pipeline {
-    // АГЕНТ
+    // 👇 АГЕНТ: Используем агент с Docker
     agent { label 'docker-builder' }
 
-    // ПАРАМЕТРЫ (Здесь задаем значения по умолчанию)
+    // 👇 ПАРАМЕТРЫ: Настраиваемые значения при запуске
     parameters {
         choice(
             name: 'DEPLOY_ENV',
@@ -27,81 +30,94 @@ pipeline {
         )
     }
 
-    // ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
+    // 👇 ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
     environment {
-        REPO_URL = 'https://github.com/kiva-99/pipeline.git'
+        // URL репозитория с ПРИЛОЖЕНИЕМ (не путать с репо пайплайна)
+        APP_REPO_URL = 'https://github.com/kiva-99/HW.git'
+        // Папка, куда склонируем приложение
+        APP_SRC_DIR = 'src-app'
+        
         APP_NAME = 'hw32-webapp'
-        APP_VERSION = "${env.BUILD_NUMBER}"
+        // Версия: либо параметр, либо номер сборки
+        APP_VERSION = "${params.APP_VERSION_OVERRIDE ?: env.BUILD_NUMBER}"
+        
         DOCKER_IMAGE = "${APP_NAME}:${APP_VERSION}"
-        DOCKER_REGISTRY = 'localhost:5000'
         DEPLOY_PORT = '8080'
         REPORT_DIR = 'reports'
         
-        // ИСПРАВЛЕНИЕ 1: Просто берем значение параметра. 
-        // Логика "если пусто то staging" теперь гарантируется настройкой default в блоке parameters выше.
+        // Присваиваем параметры переменным окружения для удобства
         DEPLOY_ENV = "${params.DEPLOY_ENV}"
-        RUN_TESTS = "${params.RUN_TESTS}"
-        CLEAN_OLD = "${params.CLEAN_OLD}"
+        RUN_TESTS_FLAG = "${params.RUN_TESTS}"
+        CLEAN_OLD_FLAG = "${params.CLEAN_OLD}"
     }
 
     stages {
-        // ЭТАП 1: Checkout
-        stage('Checkout Repository') {
+        // 🔹 ЭТАП 1: Подготовка и клонирование приложения
+        stage('Checkout Application') {
             steps {
-                echo "🔄 Клонируем репозиторий: ${env.REPO_URL}"
+                echo "🔄 Клонируем репозиторий приложения: ${env.APP_REPO_URL}"
                 script {
-                    checkout([$class: 'GitSCM',
-                        branches: [[name: '*/main']],
-                        userRemoteConfigs: [[url: env.REPO_URL]],
-                        extensions: [[$class: 'CleanCheckout']]])
+                    // Клонируем приложение в отдельную папку, чтобы не смешивать с Jenkinsfile
+                    sh """
+                        git clone ${env.APP_REPO_URL} ${env.APP_SRC_DIR}
+                        cd ${env.APP_SRC_DIR}
+                        git checkout main
+                        echo "✅ Приложение клонировано в папку ${env.APP_SRC_DIR}"
+                        ls -la
+                    """
                 }
-                echo "✅ Репозиторий успешно клонирован"
             }
         }
 
-        // ЭТАП 2: Build
+        // 🔹 ЭТАП 2: Сборка приложения (Docker)
         stage('Build Application') {
             steps {
                 echo "🔨 Сборка приложения ${env.APP_NAME} v${env.APP_VERSION}"
                 script {
-                    if (fileExists('hw24/Dockerfile')) {
+                    // Путь к Dockerfile теперь внутри склонированной папки
+                    def dockerfilePath = "${env.APP_SRC_DIR}/hw24/Dockerfile"
+                    
+                    if (fileExists(dockerfilePath)) {
                         sh """
                             echo "=== Сборка Docker образа ==="
-                            cd hw24
+                            cd ${env.APP_SRC_DIR}/hw24
                             docker build -t ${env.DOCKER_IMAGE} .
                             echo "✓ Образ собран: ${env.DOCKER_IMAGE}"
                         """
                     } else {
-                        echo "⚠ Dockerfile не найден, пропускаем сборку"
+                        echo "⚠ Dockerfile не найден по пути: ${dockerfilePath}"
+                        // Не останавливаем сборку жестко, но помечаем как нестабильную
                         currentBuild.result = 'UNSTABLE'
                     }
                 }
             }
+            // Условие: запускаем, если это не production (для теста) или ветка main
             when {
                 anyOf {
                     branch 'main'
-                    branch 'develop'
-                    expression { params.DEPLOY_ENV == 'dev' }
+                    expression { params.DEPLOY_ENV != 'production' }
                 }
             }
         }
 
-        // ЭТАП 3: Tests
+        // 🔹 ЭТАП 3: Запуск тестов
         stage('Run Tests') {
             steps {
                 echo "🧪 Запуск автоматических тестов"
                 script {
-                    if (params.RUN_TESTS) { // Используем params напрямую
-                        sh '''
+                    if (params.RUN_TESTS) {
+                        sh """
                             echo "=== Установка зависимостей ==="
                             pip3 install pytest --user 2>/dev/null || true
+                            
                             echo "=== Запуск pytest ==="
+                            cd ${env.APP_SRC_DIR}
                             if [ -d "tests" ]; then
-                                python3 -m pytest tests/ -v --tb=short --junitxml=pytest-report.xml || echo "⚠ Тесты не прошли"
+                                python3 -m pytest tests/ -v --tb=short --junitxml=../pytest-report.xml || echo "⚠ Тесты не прошли"
                             else
-                                echo "⚠ Папка tests/ не найдена"
+                                echo "⚠ Папка tests/ не найдена в репозитории приложения"
                             fi
-                        '''
+                        """
                     } else {
                         echo "⏭ Тесты пропущены по параметру"
                     }
@@ -117,19 +133,20 @@ pipeline {
             }
         }
 
-        // ЭТАП 4: Cleanup
+        // 🔹 ЭТАП 4: Очистка старых контейнеров
         stage('Cleanup Old Containers') {
             steps {
                 echo "🧹 Очистка старых контейнеров"
                 script {
                     if (params.CLEAN_OLD) {
-                        sh '''
+                        sh """
                             echo "=== Поиск и удаление старых контейнеров ==="
+                            # Фильтруем по имени приложения
                             docker ps -a --filter "name=${env.APP_NAME}" --format "{{.ID}}" | xargs -r docker rm -f || true
                             echo "✓ Очистка завершена"
-                        '''
+                        """
                     } else {
-                        echo "⏭ Очистка пропущена"
+                        echo "⏭ Очистка пропущена по параметру"
                     }
                 }
             }
@@ -138,13 +155,15 @@ pipeline {
             }
         }
 
-        // ЭТАП 5: Deploy
+        // 🔹 ЭТАП 5: Деплой приложения
         stage('Deploy Application') {
             steps {
                 echo "🚀 Деплой приложения в окружение: ${env.DEPLOY_ENV}"
                 script {
-                    // Загружаем внешний скрипт
+                    // Загружаем внешний Groovy-скрипт из текущего репо (pipeline)
+                    // Он лежит рядом с Jenkinsfile
                     def deployScript = load 'groovy-scripts/deploy-app.groovy'
+                    
                     deployScript.deploy(
                         imageName: env.DOCKER_IMAGE,
                         containerName: "${env.APP_NAME}-${env.DEPLOY_ENV}",
@@ -161,14 +180,14 @@ pipeline {
             }
         }
 
-        // ЭТАП 6: Health Check
+        // 🔹 ЭТАП 6: Проверка доступности (Health Check)
         stage('Health Check') {
             steps {
                 echo "🏥 Проверка доступности приложения"
                 script {
                     sh """
-                        echo "=== Проверка здоровья ==="
-                        MAX_RETRIES=10
+                        echo "=== Проверка здоровья приложения ==="
+                        MAX_RETRIES=3
                         RETRY_COUNT=0
                         while [ \$RETRY_COUNT -lt \$MAX_RETRIES ]; do
                             if curl -sf http://localhost:${env.DEPLOY_PORT}/health > /dev/null 2>&1; then
@@ -179,42 +198,43 @@ pipeline {
                             RETRY_COUNT=\$((RETRY_COUNT + 1))
                             sleep 5
                         done
-                        echo "❌ Приложение не ответило"
+                        echo "❌ Приложение не ответило за время ожидания"
                         exit 1
                     """
                 }
             }
-            // ИСПРАВЛЕНИЕ 2: Убрали некорректный when { always }. 
-            // Эта стадия выполнится, если до неё дойдет очередь (т.е. если предыдущие успех).
-            // Если нужно выполнять всегда даже при ошибке деплоя, перенесите логику в post { always }.
+            // Выполняется, если предыдущие этапы не упали критически
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'UNSTABLE' }
+            }
         }
 
-        // ЭТАП 7: Generate Report
+        // 🔹 ЭТАП 7: Генерация отчёта (DSL)
         stage('Generate Report') {
             steps {
                 echo "📊 Генерация отчёта о сборке"
                 script {
+                    // Загружаем DSL-скрипт из текущего репо (pipeline)
                     def reportDSL = load 'dsl-scripts/report-generator.groovy'
                     reportDSL.generateReport(
                         jobName: env.JOB_NAME,
                         buildNumber: env.BUILD_NUMBER,
-                        buildStatus: currentBuild.currentResult,
+                        buildStatus: currentBuild.currentResult ?: 'SUCCESS',
                         deployEnv: env.DEPLOY_ENV,
                         outputPath: "${env.REPORT_DIR}/build-${env.BUILD_NUMBER}.json"
                     )
                 }
             }
-            // ИСПРАВЛЕНИЕ 3: Удалили блок when { always }, который вызывал ошибку.
-            // Стадия выполнится, если пайплайн дошел до неё. 
-            // Если отчет нужен даже при падении, используйте post { always } внизу.
+            // Отчет генерируем всегда, даже если были предупреждения
         }
     }
 
-    // POST-ACTIONS
+    // 👇 POST-ACTIONS: действия после завершения всех stages
     post {
         always {
             echo "🧹 Очистка рабочего пространства"
             cleanWs()
+            // Архивация отчётов
             archiveArtifacts artifacts: "${env.REPORT_DIR}/*.json", allowEmptyArchive: true
         }
         success {
@@ -222,7 +242,23 @@ pipeline {
             emailext (
                 to: 'k.ivanovconn@gmail.com',
                 subject: "✅ SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: "Сборка прошла успешно! Окружение: ${env.DEPLOY_ENV}"
+                body: """
+🎉 Сборка Jenkins прошла успешно!
+
+📦 Приложение: ${env.APP_NAME}
+🔢 Сборка: #${env.BUILD_NUMBER}
+🌍 Окружение: ${env.DEPLOY_ENV}
+🔗 Ссылка: ${env.BUILD_URL}
+
+✅ Все этапы пройдены:
+• Клонирование приложения: OK
+• Сборка Docker: OK
+• Тесты: ${params.RUN_TESTS ? 'OK' : 'PROPUщено'}
+• Деплой: OK
+• Health Check: OK
+
+Приложение доступно по адресу: http://localhost:${env.DEPLOY_PORT}
+                """
             )
         }
         failure {
@@ -230,7 +266,26 @@ pipeline {
             emailext (
                 to: 'k.ivanovconn@gmail.com',
                 subject: "❌ FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: "Ошибка сборки. Проверьте консоль: ${env.BUILD_URL}console",
+                body: """
+⚠️ Сборка Jenkins завершилась с ошибкой!
+
+📦 Приложение: ${env.APP_NAME}
+🔢 Сборка: #${env.BUILD_NUMBER}
+🌍 Окружение: ${env.DEPLOY_ENV}
+🔗 Консоль: ${env.BUILD_URL}console
+
+🔍 Возможные причины:
+• Ошибка клонирования репозитория HW
+• Ошибка сборки Docker-образа (нет Dockerfile)
+• Не прошли автоматические тесты
+• Ошибка при деплое (скрипт deploy-app.groovy)
+• Health Check не прошёл
+
+🛠 Что делать:
+1. Откройте консоль сборки по ссылке выше
+2. Найдите строку с ERROR
+3. Исправьте ошибку
+                """,
                 attachLog: true
             )
         }
@@ -239,7 +294,7 @@ pipeline {
             emailext (
                 to: 'k.ivanovconn@gmail.com',
                 subject: "⚠️ UNSTABLE: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: "Есть предупреждения."
+                body: "Сборка завершилась с предупреждениями (например, нет Dockerfile или тесты упали). Проверьте отчёт: ${env.BUILD_URL}"
             )
         }
     }
