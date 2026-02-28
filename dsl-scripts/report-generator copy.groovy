@@ -1,4 +1,5 @@
-// report-generator.groovy — DSL-скрипт для генерации JSON-отчёта
+// dsl-scripts/report-generator.groovy
+// Генерация JSON-отчёта о сборке Jenkins
 // Автор: Иванов Кирилл Константинович
 
 def generateReport(Map config) {
@@ -14,11 +15,11 @@ def generateReport(Map config) {
         // Создаём папку для отчётов, если не существует
         sh "mkdir -p ${outputPath.substring(0, outputPath.lastIndexOf('/'))}"
         
-        // Получаем длительность сборки из env (безопасный доступ)
+        // Получаем длительность сборки из env (исправление #1)
         def buildDuration = env.BUILD_DURATION ?: 'N/A'
         def timestamp = new Date().format('yyyy-MM-dd HH:mm:ss')
         
-        // Формируем JSON вручную (безопасно для Jenkins Sandbox)
+        // Формируем JSON вручную (безопасно для Sandbox)
         def reportContent = """{
   "job": "${jobName}",
   "build_number": ${buildNumber},
@@ -27,8 +28,8 @@ def generateReport(Map config) {
   "timestamp": "${timestamp}",
   "duration": "${buildDuration}",
   "artifacts": {
-    "docker_image": "${config.imageName ?: 'hw32-webapp:' + buildNumber}",
-    "port": ${config.port ?: 8090}
+    "docker_image": "hw32-webapp:${buildNumber}",
+    "port": 8090
   },
   "checks": {
     "checkout": "OK",
@@ -38,7 +39,7 @@ def generateReport(Map config) {
   }
 }"""
         
-        // Записываем отчёт в файл через Jenkins-шаг (надёжнее shell)
+        // Записываем отчёт в файл
         writeFile file: outputPath, text: reportContent
         echo "✅ Отчёт сохранён: ${outputPath}"
         
@@ -46,17 +47,16 @@ def generateReport(Map config) {
         echo "📋 Сводка:"
         echo "   • Статус: ${buildStatus}"
         echo "   • Окружение: ${deployEnv}"
-        echo "   • Порт: ${config.port ?: 8090}"
+        echo "   • Порт: 8090"
         
         return [success: true, path: outputPath]
         
     } catch (Exception e) {
         echo "❌ Ошибка генерации отчёта: ${e.message}"
-        // Не используем printStackTrace() — заблокирован Sandbox
+        // Исправление #2: не используем printStackTrace(), только message
         echo "   Детали: ${e.class.name}"
         throw e
     }
 }
 
-// Возвращаем этот объект для вызова через load
 return this
