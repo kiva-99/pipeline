@@ -1,0 +1,15 @@
+﻿# Исключаем чувствительные данные
+*.key
+*.pub
+passwords.txt
+secrets/
+agent-keys/
+data/
+
+# Исключаем всё, кроме нужных файлов
+*
+!Jenkinsfile
+!README.md
+!.gitignore
+!groovy-scripts/
+!dsl-scripts/
