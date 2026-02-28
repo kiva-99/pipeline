@@ -1,10 +1,13 @@
-// deploy-app.groovy — Groovy-скрипт для деплоя Docker-контейнера
-def call(Map config) {
+// deploy-app.groovy
+// Скрипт деплоя Docker-контейнера
+
+// Явно объявляем функцию deploy
+def deploy(Map config) {
     def imageName = config.imageName ?: 'app:latest'
     def containerName = config.containerName ?: 'app-container'
     def port = config.port ?: '8080'
     def environment = config.environment ?: 'staging'
-    
+
     echo "🚀 Деплой: ${imageName} → ${containerName} (порт ${port}, env: ${environment})"
 
     try {
@@ -38,4 +41,6 @@ def call(Map config) {
         throw e
     }
 }
+
+// Возвращаем этот объект, чтобы методы были доступны
 return this
