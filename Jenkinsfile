@@ -42,7 +42,7 @@ pipeline {
         APP_VERSION = "${params.APP_VERSION_OVERRIDE ?: env.BUILD_NUMBER}"
         
         DOCKER_IMAGE = "${APP_NAME}:${APP_VERSION}"
-        DEPLOY_PORT = '8081'
+        DEPLOY_PORT = '8090'
         REPORT_DIR = 'reports'
         
         // Присваиваем параметры переменным окружения

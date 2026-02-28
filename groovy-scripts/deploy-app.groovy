@@ -5,7 +5,7 @@
 def deploy(Map config) {
     def imageName = config.imageName ?: 'app:latest'
     def containerName = config.containerName ?: 'app-container'
-    def port = config.port ?: '8081'
+    def port = config.port ?: '8090'
     def environment = config.environment ?: 'staging'
 
     echo "🚀 Деплой: ${imageName} → ${containerName} (порт ${port}, env: ${environment})"
