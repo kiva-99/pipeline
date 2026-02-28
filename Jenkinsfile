@@ -13,6 +13,11 @@ pipeline {
             choices: ['dev', 'staging', 'production'],
             description: 'Окружение для деплоя'
         )
+        string(
+            name: 'HW_BRANCH',
+            defaultValue: 'main',
+            description: 'Ветка репозитория HW для сборки (main, develop, feature/...)'
+        )
         booleanParam(
             name: 'RUN_TESTS',
             defaultValue: true,
@@ -44,20 +49,21 @@ pipeline {
         REPORT_DIR = 'reports'
         // Присваиваем параметры переменным окружения
         DEPLOY_ENV = "${params.DEPLOY_ENV}"
+        HW_BRANCH = "${params.HW_BRANCH}"
     }
 
     stages {
         // 🔹 ЭТАП 1: Подготовка и клонирование приложения
         stage('Checkout Application') {
             steps {
-                echo "🔄 Клонируем репозиторий приложения: ${env.APP_REPO_URL}"
+                echo "🔄 Клонируем репозиторий приложения: ${env.APP_REPO_URL} (ветка: ${env.HW_BRANCH})"
                 script {
                     sh """
                         rm -rf ${env.APP_SRC_DIR} || true
-                        git clone ${env.APP_REPO_URL} ${env.APP_SRC_DIR}
+                        git clone -b ${env.HW_BRANCH} ${env.APP_REPO_URL} ${env.APP_SRC_DIR}
                         cd ${env.APP_SRC_DIR}
-                        git checkout main
-                        echo "✅ Приложение клонировано в папку ${env.APP_SRC_DIR}"
+                        git log -1 --oneline
+                        echo "✅ Приложение клонировано из ветки ${env.HW_BRANCH} в папку ${env.APP_SRC_DIR}"
                     """
                 }
             }
@@ -197,6 +203,9 @@ pipeline {
                         deployEnv: env.DEPLOY_ENV,
                         outputPath: "${env.REPORT_DIR}/build-${env.BUILD_NUMBER}.json"
                     )
+                    # Вывод содержимого отчёта в консоль
+                    echo "📄 Содержимое отчёта:"
+                    sh "cat ${env.REPORT_DIR}/build-${env.BUILD_NUMBER}.json"
                 }
             }
         }
@@ -205,9 +214,15 @@ pipeline {
     // 👇 POST-ACTIONS: действия после завершения всех stages
     post {
         always {
+            echo "📦 Архивация артефактов..."
+            archiveArtifacts(
+                artifacts: "${env.REPORT_DIR}/*.json",
+                allowEmptyArchive: true,
+                fingerprint: true
+            )
+            
             echo "🧹 Очистка рабочего пространства"
             cleanWs()
-            archiveArtifacts artifacts: "${env.REPORT_DIR}/*.json", allowEmptyArchive: true
         }
         success {
             echo "✅ Сборка успешна!"
@@ -219,6 +234,7 @@ pipeline {
                     📦 Приложение: ${env.APP_NAME}
                     🔢 Сборка: #${env.BUILD_NUMBER}
                     🌍 Окружение: ${env.DEPLOY_ENV}
+                    🌿 Ветка HW: ${env.HW_BRANCH}
                     🔗 Ссылка: ${env.BUILD_URL}
                     ✅ Все этапы пройдены:
                     • Клонирование приложения: OK
@@ -239,6 +255,7 @@ pipeline {
                     📦 Приложение: ${env.APP_NAME}
                     🔢 Сборка: #${env.BUILD_NUMBER}
                     🌍 Окружение: ${env.DEPLOY_ENV}
+                    🌿 Ветка HW: ${env.HW_BRANCH}
                     🔗 Консоль: ${env.BUILD_URL}console
                     🔍 Возможные причины:
                     • Ошибка клонирования репозитория HW
